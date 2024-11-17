@@ -11,14 +11,25 @@ import "base:builtin"
 
 window_width: i32 : 1280 
 window_height: i32 : 960 
-
 background_color := make_color_rgba8(0x282726ff)
+foreground_color := make_color_rgba8(0x205EA6ff)
+
+cell_size: i32 : 32
+num_cells_x :: window_width / cell_size
+num_cells_y :: window_height / cell_size
+num_cells :: num_cells_x * num_cells_y
+
+CellState :: enum {
+    DEAD,
+    ALIVE
+}
 
 state: struct {
     pass_action: sg.Pass_Action,
     pip: sg.Pipeline,
     bind: sg.Bindings,
-    pixel_buffer: [window_width*window_height]u32
+    pixel_buffer: [window_width*window_height]u32,
+    cells: [num_cells]CellState
 }
 
 init :: proc "c" () {
@@ -95,6 +106,7 @@ frame :: proc "c" () {
     context = runtime.default_context()
 
     clear_color_buffer(background_color)
+    draw_grid(cell_size, foreground_color)
 
     // Update image
     size := u64(size_of(state.pixel_buffer))
@@ -119,10 +131,17 @@ cleanup :: proc "c" () {
     sg.shutdown()
 }
 
+draw_pixel :: proc(x, y: i32, color: u32) {
+    if x < 0 || x > window_width || y < 0 || y > window_height {
+        return
+    }
+    state.pixel_buffer[(y * window_width) + x] = color 
+}
+
 clear_color_buffer :: proc(color: u32) {
     for y in 0..<window_height {
         for x in 0..<window_width {
-            state.pixel_buffer[(y * window_width) + x] = color 
+            draw_pixel(x, y, color)
         }
     }
 }
@@ -132,7 +151,7 @@ draw_rectangle :: proc(x, y, w, h :i32, color: u32) {
         for j in 0..<w {
             curr_x := j + x
             curr_y := i + y 
-            state.pixel_buffer[(curr_y * window_width) + curr_x] = color 
+            draw_pixel(curr_x, curr_y, color)
         }
     }
 }
@@ -152,6 +171,17 @@ make_color_rgba8 :: proc(color: u32) -> u32 {
     } 
     // In other cases just return color 
     return color
+}
+
+
+draw_grid :: proc(cell_size: i32, color: u32) {
+    for y in 0..<window_height {
+        for x in 0..<window_width {
+            if x % cell_size == 0 || y % cell_size == 0 {
+                draw_pixel(x, y, color)
+            }
+        }
+    }
 }
 
 main :: proc () {
