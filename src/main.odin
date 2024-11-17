@@ -1,6 +1,7 @@
 package main
 
 import "core:fmt"
+import "core:math/rand"
 
 import "base:runtime"
 import slog "sokol/log"
@@ -16,7 +17,7 @@ foreground_color := make_color_rgba8(0x205EA6ff)
 cell_alive_color := make_color_rgba8(0x205EA6ff)
 cell_dead_color := make_color_rgba8(0x282726ff)
 
-cell_size: i32 : 32
+cell_size: i32 : 64 
 num_cells_x :: window_width / cell_size
 num_cells_y :: window_height / cell_size
 num_cells :: num_cells_x * num_cells_y
@@ -101,7 +102,8 @@ init :: proc "c" () {
             0 = { load_action = .CLEAR, clear_value = { 0, 0, 0, 1 }},
         },
     }
-    state.cell_states[0] = .ALIVE
+
+    state.cell_states = init_cell_states()
 }
 
 
@@ -109,9 +111,8 @@ frame :: proc "c" () {
     context = runtime.default_context()
 
     clear_color_buffer(background_color)
-
+    state.cell_states = apply_cell_state_rules(state.cell_states)
     draw_cell_states(state.cell_states[:])
-    draw_grid(cell_size, foreground_color)
 
     // Update image
     size := u64(size_of(state.pixel_buffer))
@@ -191,11 +192,115 @@ draw_grid :: proc(cell_size: i32, color: u32) {
 
 draw_cell_states :: proc(cell_states:[]CellState) {
     for cell_state, index in cell_states {
+        // Convert index to x and y position
         x := i32(index) % num_cells_x
         y := i32(index) / num_cells_x 
         color := cell_state == .DEAD ? cell_dead_color : cell_alive_color
         draw_rectangle(x * cell_size, y * cell_size, cell_size, cell_size, color)
     }
+    draw_grid(cell_size, foreground_color)
+}
+
+apply_cell_state_rules :: proc(cell_states:[num_cells]CellState) -> [num_cells]CellState {
+    new_cell_states: [num_cells]CellState
+    for cell_state, index in cell_states {
+        // Convert index to x and y position
+        x := i32(index) % num_cells_x
+        y := i32(index) / num_cells_x 
+
+        new_cell_state := cell_state
+
+        // Get living neighbours and apply rule for Convways Game of Live
+        num_living_neighbours := get_living_neighbours(cell_states, i32(index))
+        if cell_state == .ALIVE {
+            // 1: Any live cell with fewer than two live neighbours dies
+            if num_living_neighbours < 2 {
+                new_cell_state = .DEAD
+            } else if num_living_neighbours == 2 || num_living_neighbours == 3 {
+                // 2: Any live cell with two or three live neighbours lives
+                new_cell_state = .ALIVE
+            } else {
+                // 3: Any live cell with more then three live neibhours dies
+                new_cell_state = .DEAD
+            }
+        }
+        else {
+            // 4: Any dead cell with exactly three live neighbours becomes alive again 
+            if num_living_neighbours == 3 {
+                new_cell_state = .ALIVE
+            }
+        }
+        new_cell_states[index] = new_cell_state
+    }
+
+    return new_cell_states
+}
+
+get_living_neighbours :: proc(cell_states:[num_cells]CellState, x: i32) -> u32 {
+    /*
+        [ ][ ][ ]
+        ^
+        top_row
+        [ ][x][ ]
+        ^
+        middle_row
+        [ ][ ][ ]
+        ^
+        bottom_row
+    */
+    // Check top row
+    top_row_start := x - num_cells_x - 1
+    middle_row_start := x - 1
+    bottom_row_start:= x + num_cells_x + 1 
+    num_living_neighbours: u32 = 0
+
+    // Check top row
+    for i in 0..<3 {
+        index := top_row_start + i32(i)
+        if index < 0 || index >= num_cells || index == x {
+            // Skip invalid index
+            continue
+        }
+        cell_state := cell_states[index]
+        if cell_state == .ALIVE {
+            num_living_neighbours += 1
+        }
+    }
+
+    // Check middle row
+    for i in 0..<3 {
+        index := middle_row_start + i32(i)
+        if index < 0 || index >= num_cells || index == x {
+            // Skip invalid index
+            continue
+        }
+        cell_state := cell_states[index]
+        if cell_state == .ALIVE {
+            num_living_neighbours += 1
+        }
+    }
+
+    // Check bottom row
+    for i in 0..<3 {
+        index := bottom_row_start + i32(i)
+        if index < 0 || index >= num_cells || index == x {
+            // Skip invalid index
+            continue
+        }
+        cell_state := cell_states[index]
+        if cell_state == .ALIVE {
+            num_living_neighbours += 1
+        }
+    }
+    return num_living_neighbours
+}
+
+init_cell_states :: proc() -> [num_cells]CellState {
+    cell_states: [num_cells]CellState
+    for i in 0..<num_cells {
+        cell_states[i] = rand.choice_enum(CellState)
+    }
+    return cell_states
 }
 
 main :: proc () {
