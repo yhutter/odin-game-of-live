@@ -13,6 +13,8 @@ window_width: i32 : 1280
 window_height: i32 : 960 
 background_color := make_color_rgba8(0x282726ff)
 foreground_color := make_color_rgba8(0x205EA6ff)
+cell_alive_color := make_color_rgba8(0x205EA6ff)
+cell_dead_color := make_color_rgba8(0x282726ff)
 
 cell_size: i32 : 32
 num_cells_x :: window_width / cell_size
@@ -29,7 +31,7 @@ state: struct {
     pip: sg.Pipeline,
     bind: sg.Bindings,
     pixel_buffer: [window_width*window_height]u32,
-    cells: [num_cells]CellState
+    cell_states: [num_cells]CellState
 }
 
 init :: proc "c" () {
@@ -99,6 +101,7 @@ init :: proc "c" () {
             0 = { load_action = .CLEAR, clear_value = { 0, 0, 0, 1 }},
         },
     }
+    state.cell_states[0] = .ALIVE
 }
 
 
@@ -106,6 +109,8 @@ frame :: proc "c" () {
     context = runtime.default_context()
 
     clear_color_buffer(background_color)
+
+    draw_cell_states(state.cell_states[:])
     draw_grid(cell_size, foreground_color)
 
     // Update image
@@ -181,6 +186,15 @@ draw_grid :: proc(cell_size: i32, color: u32) {
                 draw_pixel(x, y, color)
             }
         }
+    }
+}
+
+draw_cell_states :: proc(cell_states:[]CellState) {
+    for cell_state, index in cell_states {
+        x := i32(index) % num_cells_x
+        y := i32(index) / num_cells_x 
+        color := cell_state == .DEAD ? cell_dead_color : cell_alive_color
+        draw_rectangle(x * cell_size, y * cell_size, cell_size, cell_size, color)
     }
 }
 
