@@ -1,14 +1,18 @@
 package main
 
+import "base:runtime"
+import "base:builtin"
+
 import "core:fmt"
 import "core:math/rand"
+import "core:os"
 
-import "base:runtime"
 import slog "sokol/log"
 import sg "sokol/gfx"
 import sapp "sokol/app"
 import sglue "sokol/glue"
-import "base:builtin"
+
+import stbi "vendor:stb/image"
 
 window_width: i32 : 1280 
 window_height: i32 : 960 
@@ -17,10 +21,15 @@ foreground_color := make_color_rgba8(0x205EA6ff)
 cell_alive_color := make_color_rgba8(0x205EA6ff)
 cell_dead_color := make_color_rgba8(0x282726ff)
 
-cell_size: i32 : 64 
+cell_size: i32 : 3
 num_cells_x :: window_width / cell_size
 num_cells_y :: window_height / cell_size
 num_cells :: num_cells_x * num_cells_y
+
+GameState :: enum {
+    DRAWING,
+    RUNNING
+}
 
 CellState :: enum {
     DEAD,
@@ -32,11 +41,16 @@ state: struct {
     pip: sg.Pipeline,
     bind: sg.Bindings,
     pixel_buffer: [window_width*window_height]u32,
-    cell_states: [num_cells]CellState
+    cell_states: [num_cells]CellState,
+    game_state: GameState,
+    drawing_index: i32,
+    event_type: sapp.Event_Type,
+    key_code: sapp.Keycode
 }
 
 init :: proc "c" () {
     context = runtime.default_context()
+    fmt.println(num_cells_x, num_cells_y)
 
     sg.setup({
         environment = sglue.environment(),
@@ -103,15 +117,51 @@ init :: proc "c" () {
         },
     }
 
-    state.cell_states = init_cell_states()
+    state.cell_states = init_cell_states_from_image()
+    // state.cell_states = init_cell_states()
+    state.game_state = .DRAWING
+}
+
+event :: proc "c" (event: ^sapp.Event) {
+    context = runtime.default_context()
+    // Switch between running and drawing
+    state.event_type = event.type
+    if event.type == .KEY_UP && event.key_code == .D {
+        if state.game_state == .RUNNING {
+            // Before switching to drawing clear all cells
+            state.cell_states = clear_cell_states()
+            state.game_state = .DRAWING
+        }
+        else {
+            state.game_state = .RUNNING
+        }
+    }
+    cell_x := i32(event.mouse_x) / cell_size
+    cell_y := i32(event.mouse_y) / cell_size
+
+    // Ignore when out of bounds
+    if cell_x < 0 || cell_x >= num_cells_x || cell_y < 0 || cell_y >= num_cells_y {
+        state.drawing_index = -1
+    }
+    else {
+        state.drawing_index = (cell_y * num_cells_x) + cell_x
+    }
 }
 
 
 frame :: proc "c" () {
     context = runtime.default_context()
-
     clear_color_buffer(background_color)
-    state.cell_states = apply_cell_state_rules(state.cell_states)
+
+    // Drawing
+    if state.game_state == .DRAWING {
+        if state.event_type == .MOUSE_DOWN && state.drawing_index != -1 {
+            state.cell_states[state.drawing_index] = .ALIVE
+        }
+    } else {
+        // Running
+        state.cell_states = apply_cell_state_rules(state.cell_states)
+    }
     draw_cell_states(state.cell_states[:])
 
     // Update image
@@ -122,7 +172,6 @@ frame :: proc "c" () {
         size = size
     }
     sg.update_image(state.bind.images[IMG_tex], image_data);
-
 
     sg.begin_pass({ action = state.pass_action, swapchain = sglue.swapchain() })
     sg.apply_pipeline(state.pip)
@@ -198,18 +247,13 @@ draw_cell_states :: proc(cell_states:[]CellState) {
         color := cell_state == .DEAD ? cell_dead_color : cell_alive_color
         draw_rectangle(x * cell_size, y * cell_size, cell_size, cell_size, color)
     }
-    draw_grid(cell_size, foreground_color)
+    // draw_grid(cell_size, foreground_color)
 }
 
 apply_cell_state_rules :: proc(cell_states:[num_cells]CellState) -> [num_cells]CellState {
     new_cell_states: [num_cells]CellState
     for cell_state, index in cell_states {
-        // Convert index to x and y position
-        x := i32(index) % num_cells_x
-        y := i32(index) / num_cells_x 
-
         new_cell_state := cell_state
-
         // Get living neighbours and apply rule for Convways Game of Live
         num_living_neighbours := get_living_neighbours(cell_states, i32(index))
         if cell_state == .ALIVE {
@@ -251,7 +295,7 @@ get_living_neighbours :: proc(cell_states:[num_cells]CellState, x: i32) -> u32 {
     // Check top row
     top_row_start := x - num_cells_x - 1
     middle_row_start := x - 1
-    bottom_row_start:= x + num_cells_x + 1 
+    bottom_row_start:= x + num_cells_x - 1 
     num_living_neighbours: u32 = 0
 
     // Check top row
@@ -303,10 +347,45 @@ init_cell_states :: proc() -> [num_cells]CellState {
     return cell_states
 }
 
+init_cell_states_from_image :: proc() -> [num_cells]CellState {
+    cell_states: [num_cells]CellState
+
+    path :cstring = "./src/sako.png"
+    width: i32
+    height: i32
+    components: i32
+    
+    data := stbi.load(path, &width, &height, &components, 1)
+    size := width * height
+    
+    // TODO: Safety check of size
+    for y in 0..<height {
+        for x in 0..<width {
+            index := (y * width) + x
+            // Note: The pixel index and cell index are not mapped 1:1 to get the correct cell index
+            // we need to consider the number of cells available on the x axis
+            cell_index := (y * num_cells_x) + x
+            pixel := data[index]
+            cell_state: CellState = pixel == 0 ? .ALIVE : .DEAD
+            cell_states[cell_index] = cell_state
+        }
+    }
+    return cell_states
+}
+
+clear_cell_states :: proc() -> [num_cells]CellState {
+    cell_states: [num_cells]CellState
+    for i in 0..<num_cells {
+        cell_states[i] = .DEAD 
+    }
+    return cell_states
+}
+
 main :: proc () {
     sapp.run({
         init_cb = init,
         frame_cb = frame,
+        event_cb = event,
         cleanup_cb = cleanup,
         width = window_width,
         height = window_height,
