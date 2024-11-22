@@ -16,10 +16,10 @@ import stbi "vendor:stb/image"
 
 window_width: i32 : 1280 
 window_height: i32 : 960 
-background_color := make_color_rgba8(0x282726ff)
-foreground_color := make_color_rgba8(0x205EA6ff)
-cell_alive_color := make_color_rgba8(0x205EA6ff)
-cell_dead_color := make_color_rgba8(0x282726ff)
+foreground_color := make_color_rgba8(0x181818ff)
+background_color := make_color_rgba8(0x96a6c8ff)
+cell_alive_color := foreground_color
+cell_dead_color := background_color
 
 cell_size: i32 : 3
 num_cells_x :: window_width / cell_size
@@ -389,7 +389,7 @@ main :: proc () {
         cleanup_cb = cleanup,
         width = window_width,
         height = window_height,
-        window_title = "quad",
+        window_title = "Odin Game of Live",
         icon = { sokol_default = true },
         logger = { func = slog.func },
     })
